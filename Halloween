@@ -1,0 +1,281 @@
+--[[
+ code by lucas 
+]]
+
+print(getgenv().MAX_CANDY)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+local Effects = Workspace:WaitForChild("Effects")
+local Event = ReplicatedStorage.Remotes:FindFirstChild("SellCandyBag")
+
+local Module = {
+	DayNightService = require(ReplicatedStorage.Shared.Services.DayNightService),
+	HalloweenService = require(ReplicatedStorage.Shared.Services.HalloweenService),
+	Constants = require(ReplicatedStorage.Shared.Constants),
+}
+
+local KnockCooldown = (Module.Constants.TrickOrTreat and Module.Constants.TrickOrTreat.KnockCooldown) or 1.2
+local lastKnockTime = 0
+
+
+local function __xcall(fn)
+	return setmetatable({}, {
+		__call = function(_, ...)
+			return fn(...)
+		end
+	})
+end
+
+local _func = {}
+local cachedRoot = nil
+
+_func.Find = __xcall(function(parent, name, recursive)
+	if not parent then return nil end
+	local obj = parent:FindFirstChild(name)
+	if not obj and recursive then
+		obj = parent:FindFirstChild(name, true)
+	end
+	return obj
+end)
+
+_func.GetRoot = __xcall(function()
+	if cachedRoot and cachedRoot.Parent then return cachedRoot end
+	local char = LocalPlayer.Character
+	cachedRoot = char and char:FindFirstChild("HumanoidRootPart")
+	return cachedRoot
+end)
+
+_func.GetDoorData = __xcall(function(House)
+	local DoorRig = _func.Find(House, "Door_Rig", true) ; if not DoorRig then return nil, nil end
+	local root = DoorRig.PrimaryPart or _func.Find(DoorRig, "RootPart") or DoorRig:FindFirstChildWhichIsA("BasePart") ; if not root then return nil, nil end
+	local attachment = _func.Find(root, "Attachment") or _func.Find(root, "PlayerAttachment") ; if not attachment then return nil, nil end
+	local prompt = attachment:FindFirstChildOfClass("ProximityPrompt") ; if not prompt then return nil, nil end
+	return attachment.WorldCFrame, prompt
+end)
+
+_func.PressPrompt = __xcall(function(prompt)
+	prompt:InputHoldBegin()
+	task.wait(0.15)
+	prompt:InputHoldEnd()
+	task.wait(0.3)
+	return not prompt.Enabled
+end)
+
+_func.TriggerPrompt = __xcall(function(prompt)
+	if not prompt or not prompt:IsA("ProximityPrompt") or not prompt.Enabled then
+		return false
+	end
+	if _func.PressPrompt(prompt) then return true end
+	if _func.PressPrompt(prompt) then return true end
+	return false
+end)
+
+_func.FindCandyCorns = __xcall(function()
+	local a = {}
+	for _, obj in ipairs(Effects:GetChildren()) do
+		if obj:IsA("Model") and obj.Name == "CandyCorn" then
+			table.insert(a, obj)
+		end
+	end
+	return a
+end)
+
+_func.ToCandy = __xcall(function(candy)
+	local Root = _func.GetRoot()
+	if not Root or not candy or not candy.Parent then return end
+	local pos = candy.PrimaryPart and candy.PrimaryPart.Position or candy:GetPivot().Position
+	Root.CFrame = CFrame.new(pos + Vector3.new(0, 2.5, 0))
+end)
+
+_func.WaitUntilCollected = __xcall(function(timeout)
+	timeout = timeout or 6
+	local start = os.clock()
+	while os.clock() - start < timeout do
+		local left = _func.FindCandyCorns()
+		if #left == 0 then return true end
+		for _, candy in ipairs(left) do
+			if candy.Parent then
+				_func.ToCandy(candy)
+			end
+		end
+		task.wait(0.2)
+	end
+	return #_func.FindCandyCorns() == 0
+end)
+
+_func.CanKnockNow = __xcall(function()
+	return (Workspace:GetServerTimeNow() - lastKnockTime) >= KnockCooldown
+end)
+
+_func.WaitGlobalCooldown = __xcall(function()
+	if _func.CanKnockNow() then return end
+	local waitLeft = KnockCooldown - (Workspace:GetServerTimeNow() - lastKnockTime)
+	task.wait(math.max(waitLeft + 0.05, 0.1))
+end)
+
+_func.GetPlot = __xcall(function()
+	local plots = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("PlotModels")
+	if not plots then return nil end
+	return plots:FindFirstChild(LocalPlayer.Name)
+end)
+
+_func.GetCandyCount = __xcall(function()
+	local plot = _func.GetPlot() ; if not plot then return 0 end
+	local conveyor = plot:FindFirstChild("Systems") and plot.Systems:FindFirstChild("TycoonConveyor") ; if not conveyor then return 0 end
+	local candyPart = conveyor:FindFirstChild("CandyPart") ; if not candyPart then return 0 end
+	local gui = candyPart:FindFirstChild("CandyBillboardGui") ; local frame = gui:FindFirstChild("CashFrame") ; local label = frame:FindFirstChild("CashLabel")
+	local text = label.Text ; local num = tonumber(string.match(text, "(%d+)/"))
+	return num or 0
+end)
+
+_func.PickupCandyBag = __xcall(function()
+	local plot = _func.GetPlot()
+	if not plot then return false end
+	local conveyor = plot:FindFirstChild("Systems") and plot.Systems:FindFirstChild("TycoonConveyor")
+	if not conveyor then return false end
+	local candyPart = conveyor:FindFirstChild("CandyPart")
+	if not candyPart then return false end
+	local Root = _func.GetRoot()
+	if Root then
+		Root.CFrame = candyPart.CFrame + Vector3.new(0, 3, 0)
+		task.wait(0.4)
+	end
+	local Event = ReplicatedStorage.Remotes:FindFirstChild("PickupCandyBag")
+	if Event then
+		Event:FireServer(candyPart)
+		task.wait(0.5)
+		return true
+	end
+	return false
+end)
+
+_func.findBag = __xcall(function(parent)
+    if not parent then return nil end
+    local bag = parent:FindFirstChild("CandyBag")
+    if bag then return bag end
+    for _, child in ipairs(parent:GetChildren()) do
+        if child:IsA("Tool") and (child.Name:lower():find("candy") or child:GetAttribute("InventoryType") == "CandyBag") then
+            return child
+        end
+    end
+    return nil
+end)
+
+_func.GetCandyBagKey = __xcall(function()
+	local bag = _func.findBag(LocalPlayer.Backpack)
+	if not bag then
+		bag = _func.findBag(LocalPlayer.Character)
+	end
+	if not bag then return nil end
+	return bag:GetAttribute("InventoryKey")
+end)
+
+_func.SellCandyBag = __xcall(function()
+	local key = _func.GetCandyBagKey()
+	local plot = _func.GetPlot()
+	local zones = plot:FindFirstChild("Systems") and plot.Systems:FindFirstChild("Zones")
+	local sellNpc = zones:FindFirstChild("sell npc") ; if not sellNpc then return false end
+	local Root = _func.GetRoot()
+	if Root then
+		Root.CFrame = sellNpc:GetPivot() + Vector3.new(0, 3, 0)
+		task.wait(0.4)
+	end
+	if Event then
+		Event:FireServer(key)
+		task.wait(0.5)
+		return true
+	end
+	return false
+end)
+
+_func.TrySell = __xcall(function()
+	if _func.GetCandyBagKey() then
+		print("sell") ; return _func.SellCandyBag()
+	end
+	local count = _func.GetCandyCount()
+	if count >= getgenv().MAX_CANDY  then
+		print("Candy full:", count, "/", getgenv().MAX_CANDY , "-> pickup & sell")
+		if _func.PickupCandyBag() then
+			task.wait(0.6)
+			return _func.SellCandyBag()
+		end
+	end
+	return false
+end)
+
+_func.RunNight = __xcall(function()
+	local Root = _func.GetRoot()
+	if not Root then return 0 end
+
+	local houses = CollectionService:GetTagged("HouseSystemModel")
+	local done = 0
+
+	for _, House in ipairs(houses) do
+		local houseName = House.Name
+		Root = _func.GetRoot()
+		if not Root then break end
+		if not Module.DayNightService.CanTrickOrTreat() then break end
+		if Module.HalloweenService.IsHouseOnCooldown(LocalPlayer, houseName) then continue end
+		_func.WaitGlobalCooldown()
+		local doorCFrame, prompt = _func.GetDoorData(House)
+		if not doorCFrame or not prompt or not prompt.Enabled then continue end
+		Root.CFrame = doorCFrame ; task.wait(0.45)
+		if not _func.TriggerPrompt(prompt) then continue end
+		lastKnockTime = Workspace:GetServerTimeNow() ; task.wait(3.5)
+		if #_func.FindCandyCorns() > 0 then
+			_func.WaitUntilCollected(6)
+		end
+		done += 1
+		task.wait(0.7)
+	end
+	return done
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+	cachedRoot = nil
+end)
+
+task.spawn(function()
+	while true do
+		if Module.DayNightService.CanTrickOrTreat() then
+			print("Night")
+			local success = _func.RunNight()
+			print("Night done | success:", success)
+		else
+			print("Waiting for night")
+			_func.TrySell()
+			while not Module.DayNightService.CanTrickOrTreat() do
+				_func.TrySell()
+				task.wait(3)
+			end
+		end
+		task.wait(1)
+	end
+end)
